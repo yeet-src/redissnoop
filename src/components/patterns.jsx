@@ -7,7 +7,7 @@
 // ↑/↓ select · Enter/Space expand-collapse. Pure presentation: reads the
 // `patterns` and `selected`/`expanded` signals plus the widths handed down.
 import { Box, Text, bold, fg, idx } from "yeet:tui";
-import { bar, fmtCount, lpad, pad, shareColor } from "@/lib/format.js";
+import { bar, fmtCount, lpad, pad, shareColor, srcBadge } from "@/lib/format.js";
 
 const HEADER_BG = idx(236);
 const SEL_BG = idx(238);
@@ -25,7 +25,7 @@ const headerRow = (w) => (
   <Box height="1" direction="row" bg={HEADER_BG}>
     <Text break="none">
       {[
-        fg(DIM)(pad("  key pattern", w.pat + 2)), " ",
+        fg(DIM)(pad("  src key pattern", w.pat + 6)), " ",
         fg(DIM)(lpad("share", 6)), " ",
         fg(DIM)(pad("", BAR_W)), " ",
         fg(DIM)(lpad("ops", 7)), " ",
@@ -41,6 +41,7 @@ const patRow = (p, w, isSel, isOpen) => (
     <Text break="none">
       {[
         fg(isSel ? idx(222) : DIM)(isOpen ? "▾ " : "▸ "),
+        srcBadge(p.src), " ",
         bold(fg(idx(81))(pad(p.pat, w.pat))), " ",
         fg(shareColor(p.share))(lpad(`${p.share.toFixed(1)}%`, 6)), " ",
         fg(shareColor(p.share))(bar(p.share, BAR_W)), " ",

@@ -39,11 +39,16 @@ char LICENSE[] SEC("license") = "Dual BSD/GPL";
 // `minLatency`'s initial value in probes/redissnoop.js.
 volatile __u64 min_latency_us = 0;
 
-// One completed Redis command, streamed to userspace.
+// How a command was observed. The whole point of the demo: we capture both.
+#define SRC_WIRE 0 // TCP-layer probe — sees all plaintext traffic, any client
+#define SRC_TLS  1 // SSL_write uprobe — reads INSIDE encrypted connections
+
+// One observed Redis command, streamed to userspace.
 struct redis_event {
 	__u32 pid;
-	__u32 lat_us;             // request -> reply round trip
-	__u32 req_bytes;          // size passed to tcp_sendmsg
+	__u32 lat_us;             // request -> reply round trip (wire path only)
+	__u32 req_bytes;          // request size
+	__u32 source;             // SRC_WIRE | SRC_TLS
 	char comm[TASK_COMM_LEN]; // client process
 	char cmd[CMD_LEN];        // RESP command verb, uppercased
 	char key[KEY_LEN];        // first argument, best-effort
@@ -227,11 +232,48 @@ int BPF_KPROBE(on_recv, struct sock *sk, int copied)
 	e->pid = fl->pid;
 	e->lat_us = (__u32)lat_us;
 	e->req_bytes = fl->req_bytes;
+	e->source = SRC_WIRE;
 	__builtin_memcpy(e->comm, fl->comm, sizeof(e->comm));
 	__builtin_memcpy(e->cmd, fl->cmd, sizeof(e->cmd));
 	__builtin_memcpy(e->key, fl->key, sizeof(e->key));
 	bpf_ringbuf_submit(e, 0);
 
 	bpf_map_delete_elem(&inflight, &key);
+	return 0;
+}
+
+// --- TLS path: read plaintext RESP at SSL_write, before encryption. -------
+// Same parse as the wire path, but the buffer comes straight from the app via
+// the uprobe, so it works through TLS. Requests only (client SSL_write); we
+// tag them SRC_TLS and emit immediately (no round-trip latency on this path).
+// Proven against a live TLS Redis — see experiments/FINDINGS.md.
+SEC("uprobe/SSL_write")
+int BPF_KPROBE(on_ssl_write, void *ssl, const void *buf, int num)
+{
+	if (!buf || num <= 0) return 0;
+
+	char tmp[PEEK_LEN] = {};
+	if (bpf_probe_read_user(tmp, sizeof(tmp), buf) != 0) return 0;
+	if (tmp[0] != '*') return 0; // only RESP array requests (skip replies)
+
+	struct inflight fl = {};
+	fl.pid = bpf_get_current_pid_tgid() >> 32;
+	fl.req_bytes = (__u32)num;
+	bpf_get_current_comm(&fl.comm, sizeof(fl.comm));
+	parse_resp(tmp, PEEK_LEN, &fl);
+
+	char v0 = fl.cmd[0];
+	if (!(v0 >= 'A' && v0 <= 'Z')) return 0;
+
+	struct redis_event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+	if (!e) return 0;
+	e->pid = fl.pid;
+	e->lat_us = 0; // not measured on the TLS path in this build
+	e->req_bytes = fl.req_bytes;
+	e->source = SRC_TLS;
+	__builtin_memcpy(e->comm, fl.comm, sizeof(e->comm));
+	__builtin_memcpy(e->cmd, fl.cmd, sizeof(e->cmd));
+	__builtin_memcpy(e->key, fl.key, sizeof(e->key));
+	bpf_ringbuf_submit(e, 0);
 	return 0;
 }

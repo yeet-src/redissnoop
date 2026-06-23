@@ -1,5 +1,5 @@
 // Pure presentation helpers — strings and color, no signals or BPF.
-import { idx } from "yeet:tui";
+import { fg, idx } from "yeet:tui";
 
 export const pad = (s, n) => (String(s) + " ".repeat(n)).slice(0, n);
 export const lpad = (s, n) => (" ".repeat(n) + String(s)).slice(-n);
@@ -55,6 +55,18 @@ export const wrap = (text, width) => {
   }
   if (line) lines.push(line);
   return lines.length ? lines : [""];
+};
+
+// Source badge for a row, given its observed sources (["wire"], ["tls"], or
+// both). 🔒 = seen inside encrypted (TLS) traffic; ∿ = seen on the plaintext
+// wire. Both = we caught it either way. This is the visual proof, per-row,
+// that the tool reads encrypted AND unencrypted.
+export const srcBadge = (src) => {
+  const tls = src && src.includes("tls");
+  const wire = src && src.includes("wire");
+  if (tls && wire) return fg(idx(213))("🔒∿"); // both
+  if (tls) return fg(idx(212))("🔒 ");          // encrypted only
+  return fg(idx(244))("∿ ");                    // plaintext wire
 };
 
 // Ramp a 0..100 share onto a cool→warm color so a dominant pattern reads hot.

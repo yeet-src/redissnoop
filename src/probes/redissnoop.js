@@ -37,11 +37,13 @@ const feed = [];             // recent raw commands, newest first
 let seq = 0;                 // monotonic row id + total accepted count
 let rateMark = 0;            // seq at the last rate tick
 let curRate = 0;             // commands/sec from the last window
+let wireCount = 0;           // commands seen via the TCP-layer (plaintext) probe
+let tlsCount = 0;            // commands seen via the SSL_write (encrypted) probe
 
 // Published signals.
 export const patterns = from((state) => bindAgg(state, "patterns"), []);
 export const commandMix = from((state) => bindAgg(state, "commandMix"), []);
-export const stats = from((state) => bindAgg(state, "stats"), { rate: 0, total: 0, footguns: 0 });
+export const stats = from((state) => bindAgg(state, "stats"), { rate: 0, total: 0, footguns: 0, wire: 0, tls: 0 });
 export const commands = from((state) => bindAgg(state, "commands"), []);
 
 // One subscription, many watchers. Each from() registers a publisher; the
@@ -68,6 +70,7 @@ function recompute() {
         reads: p.reads,
         writes: p.writes,
         cmds: [...p.cmds.keys()],
+        src: [...p.src], // ["wire"], ["tls"], or both
         // Drill-down payload (cheap to carry; the UI shows it only when the
         // row is expanded).
         topCmds: topN(p.cmds, TOP_N),
@@ -87,6 +90,7 @@ function recompute() {
         count: c.count,
         share: (c.count / total) * 100,
         footgun: note,
+        src: [...c.src],
         // Drill-down: which patterns/keys this verb hits.
         topPats: topN(c.pats, TOP_N),
         topKeys: topN(c.keys, TOP_N),
@@ -94,7 +98,7 @@ function recompute() {
     })
     .sort((a, b) => b.count - a.count);
   publishers.commandMix?.set(mix);
-  publishers.stats?.set({ rate: curRate, total: seq, footguns });
+  publishers.stats?.set({ rate: curRate, total: seq, footguns, wire: wireCount, tls: tlsCount });
 }
 
 function bindAgg(state, which) {
@@ -107,15 +111,18 @@ function bindAgg(state, which) {
       const cmd = cstr(e.cmd) || "?";
       if (!isRealVerb(cmd) || NOISE.has(cmd)) return; // drop noise + bad frames
       const key = cstr(e.key);
+      const src = Number(e.source) === 1 ? "tls" : "wire"; // SRC_TLS=1, SRC_WIRE=0
       seq++;
+      if (src === "tls") tlsCount++; else wireCount++;
 
       const pat = keyPattern(key);
       let p = byPattern.get(pat);
       if (!p) {
-        p = { count: 0, reads: 0, writes: 0, cmds: new Map(), keys: new Map() };
+        p = { count: 0, reads: 0, writes: 0, cmds: new Map(), keys: new Map(), src: new Set() };
         byPattern.set(pat, p);
       }
       p.count++;
+      p.src.add(src);
       if (isWrite(cmd)) p.writes++; else p.reads++;
       // Per-command tally within this pattern (for the drill-down).
       p.cmds.set(cmd, (p.cmds.get(cmd) || 0) + 1);
@@ -129,8 +136,9 @@ function bindAgg(state, which) {
       }
 
       let c = byCmd.get(cmd);
-      if (!c) { c = { count: 0, pats: new Map(), keys: new Map() }; byCmd.set(cmd, c); }
+      if (!c) { c = { count: 0, pats: new Map(), keys: new Map(), src: new Set() }; byCmd.set(cmd, c); }
       c.count++;
+      c.src.add(src);
       // Which key patterns / concrete keys this verb runs against — the
       // inverse of the patterns drill-down. Bound the key map like above.
       c.pats.set(pat, (c.pats.get(pat) || 0) + 1);
@@ -139,7 +147,7 @@ function bindAgg(state, which) {
         else if (c.keys.size < KEYS_PER_PATTERN_CAP) c.keys.set(key, 1);
       }
 
-      feed.unshift({ id: seq, cmd, key, comm: cstr(e.comm), pid: Number(e.pid) });
+      feed.unshift({ id: seq, cmd, key, comm: cstr(e.comm), pid: Number(e.pid), src });
       if (feed.length > FEED) feed.pop();
       publishers.commands?.set(feed.slice());
     });
@@ -170,5 +178,7 @@ export function reset() {
   feed.length = 0;
   seq = 0;
   rateMark = 0;
+  wireCount = 0;
+  tlsCount = 0;
   recompute();
 }

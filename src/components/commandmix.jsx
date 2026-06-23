@@ -5,7 +5,7 @@
 //
 // ↑/↓ select · Enter/Space expand-collapse. Pure presentation.
 import { Box, Text, bold, fg, idx } from "yeet:tui";
-import { bar, fmtCount, lpad, pad, shareColor } from "@/lib/format.js";
+import { bar, fmtCount, lpad, pad, shareColor, srcBadge } from "@/lib/format.js";
 
 const HEADER_BG = idx(236);
 const SEL_BG = idx(238);
@@ -18,7 +18,7 @@ const headerRow = (w) => (
   <Box height="1" direction="row" bg={HEADER_BG}>
     <Text break="none">
       {[
-        fg(DIM)(pad("  command", w.cmd + 2)), " ",
+        fg(DIM)(pad("  src command", w.cmd + 6)), " ",
         fg(DIM)(lpad("share", 6)), " ",
         fg(DIM)(pad("", BAR_W)), " ",
         fg(DIM)(lpad("ops", 7)), "  ",
@@ -33,6 +33,7 @@ const cmdRow = (c, w, isSel, isOpen) => (
     <Text break="none">
       {[
         fg(isSel ? idx(222) : DIM)(isOpen ? "▾ " : "▸ "),
+        srcBadge(c.src), " ",
         (c.footgun ? bold(fg(WARN)(pad(c.cmd, w.cmd))) : bold(fg(idx(81))(pad(c.cmd, w.cmd)))), " ",
         fg(shareColor(c.share))(lpad(`${c.share.toFixed(1)}%`, 6)), " ",
         fg(shareColor(c.share))(bar(c.share, BAR_W)), " ",
