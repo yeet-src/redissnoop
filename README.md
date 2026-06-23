@@ -1,106 +1,136 @@
-# redissnoop
+# `redissnoop`
 
-A yeet script: a reactive JSX TUI bundled with esbuild, an `@/` source
-alias, and a BPF program — all driven by one `make`.
+> **tcpdump for your Redis queries.** Watch every command hit your server, encrypted or not, without touching the app.
 
-The starter is **cpusched**: a live scheduler dashboard. The top is a
-cores × time heatmap of context-switch rate (one row per CPU, newest column
-on the right); pick a CPU (arrows or click) to watch its `prev → next` task
-feed; and a log2 histogram tracks run-queue latency. It's a small but
-complete tour of the layout and of yeet's reactive BPF.
+<p align="center">
+  <img src="https://img.shields.io/badge/platform-Linux-1793D1" alt="Linux">
+  <img src="https://img.shields.io/badge/built%20with-yeet%20%2B%20eBPF-8A2BE2" alt="yeet + eBPF">
+  <img src="https://img.shields.io/badge/license-GPL--2.0-3DA639" alt="GPL-2.0">
+  <img src="https://img.shields.io/badge/category-networking-0B5394" alt="networking">
+  <a href="https://discord.gg/dYZu9PjKB"><img src="https://img.shields.io/badge/chat-Discord-5865F2" alt="Discord"></a>
+</p>
 
-## Reactive, both ways + both egress patterns
+![demo gif or screenshot (required, lives in assets/)](assets/redissnoop.gif)
 
-- **kernel → user, streamed** — `probes/cpusched.js` builds the `cpus`
-  signal with `from(state => { …events.subscribe…; return cleanup })`: a
-  ring-buffer subscription expressed as a reactive signal whose lifecycle is
-  tied to the UI watching it. A window timer turns the stream into per-CPU
-  rates, histories, and feeds.
-- **kernel → user, polled** — `probes/runqlat.js` reads a histogram the
-  kernel aggregates in an array map (`ArrayMap.lookup` on a timer) — the
-  other egress pattern. Its program lives in a second `.bpf.c`.
-- **user → kernel** — `+`/`-` call `setMinSlice()`, which `DataSec.patch()`es
-  the `min_slice_ns` global in the *running* program's `.data` section. The
-  kernel then only emits switches whose outgoing task ran that long — a filter
-  you cannot do in userspace, since JS only sees events the kernel emitted.
+**`redissnoop` is a live, zero-config profiler that shows what your application is actually doing to Redis, read straight from the kernel with eBPF.**
 
-## Two BPF programs, one object
+> [!TIP]
+> No `MONITOR`, no proxy, no client changes, and no load on the server. It reads the Redis wire protocol at the socket layer, and hooks the TLS library to read encrypted traffic as plaintext before it is ever encrypted.
 
-`src/bpf/*.bpf.c` are independent units that `bpftool gen object` links into
-one `bin/probe.bpf.o`: `cpusched.bpf.c` (the sched_switch stream + the knob)
-and `runqlat.bpf.c` (wakeup→on-CPU latency). Add another `.bpf.c` and it's
-linked in automatically — keep `char LICENSE[]` in exactly one unit, and
-give each program a unique name. `probes/probe.js` loads the object once and
-shares its `control`; each probe module attaches its own maps.
-
-## Layout
-
-```
-Makefile              build frontend — orchestrates the two compilers
-build/bpf.mk          clang + bpftool rules: src/bpf/*.bpf.c -> bin/probe.bpf.o
-build/gen-vmlinux.sh  generates src/bpf/include/vmlinux.h from kernel BTF
-package.json          esbuild bundle script + npm deps
-tsconfig.json         `#/` -> project root, `@/` -> ./src path aliases
-src/main.jsx          entry — composition root: input + mount
-src/probes/probe.js   loads the shared BPF object (binds maps, start())
-src/probes/cpusched.js  sched_switch stream → signals + the DataSec knob
-src/probes/runqlat.js   polls the run-queue-latency histogram map
-src/components/*.jsx   pure UI: titlebar, heatmap, detail, histogram, footer
-src/lib/format.js     pure render helpers (rate, duration, heat color)
-src/bpf/cpusched.bpf.c  sched_switch program + the runtime knob
-src/bpf/runqlat.bpf.c   wakeup→on-CPU latency histogram
-bin/                  the linked BPF object lands here
-```
-
-The JS is layered: `probes/` is the only BPF-aware code (it owns the object
-and exposes plain signals), `components/` is pure presentation that reads
-those signals, and `lib/` is pure helpers. They reference each other through
-the `@/` alias; `main.jsx` wires them together and owns input.
-
-## Build & run
+## Quick start
 
 ```sh
-make           # compile BPF (clang + bpftool) + bundle JS (esbuild)
-yeet run .     # runs the bundled src/index.jsx (needs root for BPF)
+curl -fsSL https://yeet.cx | sh
+yeet run github:yeet-src/redissnoop
+```
+<sub>[Manual install guide](https://yeet.cx/docs/installation) | Linux only</sub>
+
+Tab through the three views with `Tab` (or `1` / `2` / `3`). In a table, `↑` / `↓` selects a row and `Enter` expands it. `q` quits.
+
+## A 60-second primer on watching Redis traffic
+
+Redis speaks a simple text protocol called RESP. A `GET foo` goes over the socket as a small framed message; the reply comes back the same way. Tools that show you this traffic usually sit *in the path* (a proxy) or *ask the server* (`MONITOR`), and both have a cost.
+
+| Term | What it means here |
+|---|---|
+| **RESP** | Redis's wire format. Plaintext and length-prefixed, so the first frame of a request is parseable without reassembling the whole stream. |
+| **kprobe** | A kernel hook on a function. `redissnoop` hooks `tcp_sendmsg` to see commands as the kernel sends them. |
+| **uprobe** | A hook on a *userspace* function. `redissnoop` hooks `SSL_write` in the TLS library to read the command **before** it gets encrypted. |
+| **key pattern** | The shape of a key with the variable part collapsed: `user:1839` and `user:204` both become `user:*`. How traffic gets grouped. |
+| **footgun** | A command that is cheap to type and expensive to run, like `KEYS *` (scans the whole keyspace and blocks the single-threaded server). |
+
+The trick that makes `redissnoop` cheap: it never talks to Redis. It watches the kernel's socket and TLS calls, so Redis runs exactly as it would if the tool were not there.
+
+## Common use cases
+
+Backend developers chasing a Redis slowdown, and SREs auditing what a service does to a shared cache.
+
+- Redis p95 climbed after a deploy. Which key pattern is eating the traffic?
+- A shared cache feels slow. Which service, and which commands, are hammering it?
+- Reviewing a service before launch. Is anything running `KEYS` or pulling whole collections?
+- Production Redis is behind TLS. Can you still see what your app sends it?
+
+## What you're looking at
+
+A status bar across the top, three tabbed views below it, and a key-hint footer.
+
+**Status bar.** Live commands per second, then the headline split: how many commands were seen **encrypted** versus **plaintext**, and a count of footgun commands observed. The encrypted/plaintext split is the proof that both capture paths are live at once.
+
+**Tab 1, Report.** The opinionated view, and the one that opens first. A ranked list of findings, worst first: a footgun command in use, a single key pattern dominating traffic, a hot key inside a high-cardinality pattern, a write-only counter worth batching. It reads the other two tabs for you and surfaces what is worth acting on.
+
+**Tab 2, Key Patterns.** Traffic grouped by key pattern (`user:*`, `session:*`, `cart:*`), ranked by share, with the read/write split and how many distinct keys each pattern spans. Expand a row to see its top commands and its hottest concrete keys. This is the "where is the load" view.
+
+**Tab 3, Command Mix.** The same traffic grouped by command, with a **footgun** column that flags dangerous commands (`KEYS`, `FLUSHALL`, `SMEMBERS` and `HGETALL` on large collections, `SORT`). Expand a command to see which patterns and keys it runs against. This is the "what is it doing" view.
+
+Rows are colored by capture source, so encrypted traffic and plaintext traffic are distinguishable at a glance across every view.
+
+## How it works
+
+**The BPF side.** One object, two programs, one ring buffer. Each event is tagged with the source it came from.
+
+| Program | Hook | Captures |
+|---|---|---|
+| kprobe | `tcp_sendmsg`, `tcp_cleanup_rbuf` | Plaintext RESP on the wire, from any client |
+| uprobe | `SSL_write` in `libssl` | RESP inside TLS connections, read before encryption |
+
+The send-side program reads the request buffer out of the socket's `msg_iter` and parses the RESP command and key in-kernel. The uprobe reads the same plaintext from the application's own buffer at the TLS boundary.
+
+**The JS side.**
+
+- `src/probes/` is the only BPF-aware code. It loads the object, subscribes to the ring buffer once, and rolls the stream into plain reactive signals.
+- `src/components/` and `src/lib/` are pure presentation reading those signals: the tab bar, the three views, the report heuristics, the theme.
+- `src/main.jsx` wires them together and owns keyboard input.
+
+**The data flow.** Kernel programs emit one struct per command into the ring buffer. The data layer aggregates by key pattern and by command, then publishes snapshots that the views render reactively.
+
+## Requirements
+
+> [!IMPORTANT]
+> A kernel with BTF (`CONFIG_DEBUG_INFO_BTF=y`) and uprobe support (`CONFIG_UPROBES=y`). Both are on by default on current Ubuntu, Debian, and Fedora. The encrypted-capture path needs the Redis client to use a dynamically linked OpenSSL (`libssl`).
+
+The yeet daemon, which handles the privileged BPF load. `curl -fsSL https://yeet.cx | sh` installs it.
+
+## Honest caveats
+
+> [!NOTE]
+> What `redissnoop` does not do, and what it gets wrong.
+
+- Plaintext capture only sees **TCP** traffic. A client connected over a Unix domain socket is not captured. Connect over TCP (`redis-cli -h 127.0.0.1`) to be seen.
+- Encrypted capture is **OpenSSL-only**. An app that statically links its TLS (some Go builds use BoringSSL) has no `libssl` to hook, so its encrypted traffic is invisible. Dynamically linked OpenSSL, the common case, works. (extrapolated, grounding 2 — review)
+- It is a **traffic profiler, not a latency profiler.** Per-command latency for server-blocking commands is not measured accurately and is not shown.
+- Key-pattern grouping is a heuristic. It collapses numeric, hex, and uuid-like segments to `*`; an unusual key scheme may group in ways you do not expect.
+- It reads command names and keys, not values. It is not a way to dump the contents of your database.
+
+## Community questions
+
+**Do I need to change my app or run a proxy?**
+No. `redissnoop` attaches to the kernel and the TLS library from outside. Your app and your Redis server run unmodified.
+
+**Will this slow down my Redis server like `MONITOR` does?**
+No. `MONITOR` makes the server relay every command to a client, which adds real load. `redissnoop` never talks to the server; it watches the kernel, so the server's cost is zero.
+
+**Why don't I see any traffic?**
+The most common reason is a client connected over a Unix socket instead of TCP, or, for an encrypted connection, a client that statically links TLS. Connect over TCP to confirm capture.
+
+**Is it safe to run against production?**
+The capture path is passive and adds no load, which is the design goal. It does read command keys, so treat its output like any other tool that can see query metadata. (extrapolated, grounding 3 — review)
+
+**How is this different from `redis-cli MONITOR` or `--hotkeys`?**
+`MONITOR` is a live firehose that loads the server and shows raw commands with no aggregation. `--hotkeys` is a one-shot snapshot that needs an LFU eviction policy set. `redissnoop` is continuous, adds no server load, aggregates into patterns and commands, and reads encrypted traffic too.
+
+## Building from source
+
+```sh
+make          # clang + bpftool compile the BPF, esbuild bundles the JS
+make clean
 ```
 
-`make` runs two independent compilers: **clang + bpftool** compile
-`src/bpf/*.bpf.c` and link them into one loadable object `bin/probe.bpf.o`;
-**esbuild** bundles `src/main.jsx` into `src/index.jsx`, inlining npm deps and
-the `@/` alias and leaving `yeet:*` builtins external.
+Requires `clang`, `bpftool`, and `libbpf` headers for the BPF program, plus `node` and `npm` for the esbuild bundle step. The compiled BPF object and the bundled JS are gitignored; `make` regenerates them.
 
-The data layer loads the object at runtime:
+## License
 
-```js
-const probe = new BpfObject({ exe: "../bin/probe.bpf.o", base: import.meta.dirname });
-const control = await probe
-  .bind("events", { kind: "ring_buf", btf_struct: "sched_event" })
-  .bind("probe.data", { kind: "data" })   // the .data section that holds the knob
-  .start();                                // the tracepoint auto-attaches
-```
+The BPF program is `SEC("license") = "Dual BSD/GPL"`, required because it uses GPL-only kernel helpers. (extrapolated, grounding 1 — stated in source)
 
-`base: import.meta.dirname` resolves the path against the running bundle.
-`probe.data` is libbpf's name for this object's `.data` section (confirm with
-`bpftool btf dump file bin/probe.bpf.o` if you rename things).
+---
 
-`#/` (project root) and `@/` (source root) are **bundle-time aliases** that
-esbuild resolves via tsconfig `paths`; the runtime resolver doesn't know them,
-which is why the BPF object is located with `import.meta.dirname`.
-
-## npm / jsr packages
-
-Add dependencies to `package.json` and import them normally; esbuild inlines
-them at bundle time. Only packages that run in bare V8 work — no Node builtins
-(`fs`, `net`, …), and no `Intl` / `TextEncoder` / `TextDecoder`.
-
-## Pure-JS scripts
-
-Don't need BPF? Delete `src/bpf/`, `bin/`, and `src/probes/cpusched.js`, then
-feed the components from any source that exposes the same signals.
-
-## Prerequisites
-
-- `clang` and `bpftool` (for the BPF leg; `bpftool` generates
-  `src/bpf/include/vmlinux.h` from the host kernel, which needs `CONFIG_DEBUG_INFO_BTF`)
-- `node` + `npm` at build time for esbuild (authoring only — not needed on
-  hosts that merely *run* the built project)
+Built with [yeet](https://yeet.cx/docs/?utm_source=github&utm_medium=readme&utm_campaign=redissnoop), a JS runtime for writing eBPF programs on Linux machines. Join us on [discord](https://discord.gg/dYZu9PjKB?utm_source=github&utm_medium=readme&utm_campaign=redissnoop).
