@@ -1,5 +1,6 @@
 // Pure presentation helpers — strings and color, no signals or BPF.
 import { fg, idx } from "yeet:tui";
+import { C, heatColor } from "@/lib/theme.js";
 
 export const pad = (s, n) => (String(s) + " ".repeat(n)).slice(0, n);
 export const lpad = (s, n) => (" ".repeat(n) + String(s)).slice(-n);
@@ -18,15 +19,22 @@ export const fmtCount = (n) => {
   return `${(n / 1e6).toFixed(1)}M`;
 };
 
-// A horizontal share bar (0..100 percent) of fixed width, drawn with block
-// glyphs. Used to make the dominant key patterns pop visually.
+// A horizontal share bar (0..100 percent) of fixed width. The filled portion
+// is heat-colored; the remainder is a DIM track (░) so the bar always has a
+// crisp, fixed length — far more legible than trailing blanks, and it reads
+// as a real gauge. Returns a pre-colored run.
 const FULL = "█";
 const PARTS = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
+const TRACK = "░";
 export const bar = (pct, width) => {
   const frac = Math.max(0, Math.min(1, pct / 100)) * width;
   const whole = Math.floor(frac);
   const rem = Math.floor((frac - whole) * 8);
-  return (FULL.repeat(whole) + PARTS[rem]).padEnd(width, " ");
+  const filled = FULL.repeat(whole) + PARTS[rem];
+  const track = TRACK.repeat(Math.max(0, width - filled.length));
+  // Two runs (filled heat + dim track). Returned as an array — callers spread
+  // it into their run list (styled runs can't be string-concatenated).
+  return [fg(heatColor(pct))(filled), fg(C.dim)(track)];
 };
 
 // Word-wrap a string to `width` columns, returning an array of lines. Greedy:
@@ -61,17 +69,11 @@ export const wrap = (text, width) => {
 // both). 🔒 = seen inside encrypted (TLS) traffic; ∿ = seen on the plaintext
 // wire. Both = we caught it either way. This is the visual proof, per-row,
 // that the tool reads encrypted AND unencrypted.
-export const srcBadge = (src) => {
-  const tls = src && src.includes("tls");
-  const wire = src && src.includes("wire");
-  if (tls && wire) return fg(idx(213))("🔒∿"); // both
-  if (tls) return fg(idx(212))("🔒 ");          // encrypted only
-  return fg(idx(244))("∿ ");                    // plaintext wire
-};
+// Source → row color. Encrypted wins: any TLS traffic colors the row pink
+// (the encrypted story is the point); pure-plaintext rows are blue. This is
+// how a viewer reads "we see both" — by the color, no glyphs, perfect column
+// alignment.
+export const srcColor = (src) => ((src && src.includes("tls")) ? C.tls : C.wire);
 
 // Ramp a 0..100 share onto a cool→warm color so a dominant pattern reads hot.
-const SHARE_RAMP = [39, 38, 81, 220, 215, 208, 196].map(idx);
-export const shareColor = (pct) => {
-  const i = Math.min(SHARE_RAMP.length - 1, Math.floor((pct / 100) * SHARE_RAMP.length));
-  return SHARE_RAMP[i];
-};
+export const shareColor = (pct) => heatColor(pct);

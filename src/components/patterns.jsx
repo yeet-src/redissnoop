@@ -1,19 +1,18 @@
 // Hot key-pattern view — the headline, as a keyboard accordion. One row per
-// inferred key pattern (user:*, session:*), ranked by share of traffic, with
-// a share bar and read/write split. The cluttered command list is gone from
-// the row; instead the SELECTED row expands (Enter/Space) to a drill-down:
-// top commands and top concrete keys within that pattern.
+// inferred key pattern (user:*, session:*), ranked by share of traffic. The
+// row's NAME color encodes the source: pink = seen in encrypted (TLS)
+// traffic, blue = plaintext only. No glyphs — color carries the meaning, and
+// every column lines up.
 //
-// ↑/↓ select · Enter/Space expand-collapse. Pure presentation: reads the
-// `patterns` and `selected`/`expanded` signals plus the widths handed down.
-import { Box, Text, bold, fg, idx } from "yeet:tui";
-import { bar, fmtCount, lpad, pad, shareColor, srcBadge } from "@/lib/format.js";
+// ↑/↓ select · Enter/Space expand. Pure presentation.
+import { Box, Text, bold, fg } from "yeet:tui";
+import { bar, fmtCount, lpad, pad, shareColor, srcColor } from "@/lib/format.js";
+import { C } from "@/lib/theme.js";
 
-const HEADER_BG = idx(236);
-const SEL_BG = idx(238);
-const DIM = idx(245);
-const DRILL = idx(244);
 const BAR_W = 16;
+
+// Column widths — fixed so headers and rows align exactly.
+const COL = { mark: 2, share: 7, ops: 8, rw: 11, keys: 7 };
 
 const rwSplit = (reads, writes) => {
   const t = reads + writes || 1;
@@ -21,76 +20,72 @@ const rwSplit = (reads, writes) => {
   return `${rp}r/${100 - rp}w`;
 };
 
+const spacer = () => <Box height="1"><Text> </Text></Box>;
+
 const headerRow = (w) => (
-  <Box height="1" direction="row" bg={HEADER_BG}>
+  <Box height="1" direction="row" bg={C.headerBg}>
     <Text break="none">
       {[
-        fg(DIM)(pad("  src key pattern", w.pat + 6)), " ",
-        fg(DIM)(lpad("share", 6)), " ",
-        fg(DIM)(pad("", BAR_W)), " ",
-        fg(DIM)(lpad("ops", 7)), " ",
-        fg(DIM)(pad("r/w", 11)), " ",
-        fg(DIM)(pad("keys", 8)),
+        fg(C.label)(pad("  key pattern", COL.mark + w.pat)), " ",
+        fg(C.label)(lpad("share", COL.share)), " ",
+        fg(C.label)(pad("", BAR_W)), " ",
+        fg(C.label)(lpad("ops", COL.ops)), " ",
+        fg(C.label)(pad("r / w", COL.rw)), " ",
+        fg(C.label)(lpad("keys", COL.keys)),
       ]}
     </Text>
   </Box>
 );
 
-const patRow = (p, w, isSel, isOpen) => (
-  <Box height="1" direction="row" bg={isSel ? SEL_BG : undefined}>
-    <Text break="none">
-      {[
-        fg(isSel ? idx(222) : DIM)(isOpen ? "▾ " : "▸ "),
-        srcBadge(p.src), " ",
-        bold(fg(idx(81))(pad(p.pat, w.pat))), " ",
-        fg(shareColor(p.share))(lpad(`${p.share.toFixed(1)}%`, 6)), " ",
-        fg(shareColor(p.share))(bar(p.share, BAR_W)), " ",
-        fg(idx(252))(lpad(fmtCount(p.count), 7)), " ",
-        fg(DIM)(pad(rwSplit(p.reads, p.writes), 11)), " ",
-        fg(DIM)(pad(fmtCount(p.distinctKeys) + (p.keysCapped ? "+" : ""), 8)),
-      ]}
-    </Text>
-  </Box>
-);
-
-// The drill-down, indented under an expanded row: top commands and top keys.
-const drillRows = (p, w) => {
-  const out = [];
-  const cmdLine = p.topCmds
-    .map((c) => `${c.k} ${fmtCount(c.v)}`)
-    .join("   ");
-  out.push(
-    <Box height="1" direction="row">
-      <Text break="none">{[fg(DRILL)("    commands: "), fg(idx(180))(cmdLine)]}</Text>
-    </Box>,
-  );
-  // Top concrete keys, a few per line so a hot key is obvious.
-  const keyLine = p.topKeys.map((k) => `${k.k}(${fmtCount(k.v)})`).join("   ");
-  out.push(
-    <Box height="1" direction="row">
+const patRow = (p, w, isSel, isOpen) => {
+  const c = srcColor(p.src); // pink (tls) | blue (wire)
+  return (
+    <Box height="1" direction="row" bg={isSel ? C.selBg : undefined}>
       <Text break="none">
-        {[fg(DRILL)("    top keys: "), fg(idx(252))(keyLine || "(none)")]}
+        {[
+          fg(isSel ? C.textBold : C.dim)(pad(isOpen ? "▾" : "▸", COL.mark)),
+          bold(fg(c)(pad(p.pat, w.pat))), " ",
+          fg(shareColor(p.share))(lpad(`${p.share.toFixed(1)}%`, COL.share)), " ",
+          ...bar(p.share, BAR_W), " ",
+          fg(c)(lpad(fmtCount(p.count), COL.ops)), " ",
+          fg(C.label)(pad(rwSplit(p.reads, p.writes), COL.rw)), " ",
+          fg(C.label)(lpad(fmtCount(p.distinctKeys) + (p.keysCapped ? "+" : ""), COL.keys)),
+        ]}
       </Text>
-    </Box>,
+    </Box>
   );
-  return out;
+};
+
+// Drill-down under an expanded row: top commands and top keys.
+const drillRows = (p) => {
+  const cmdLine = p.topCmds.map((c) => `${c.k} ${fmtCount(c.v)}`).join("   ");
+  const keyLine = p.topKeys.map((k) => `${k.k} ${fmtCount(k.v)}`).join("   ");
+  return [
+    <Box height="1" direction="row">
+      <Text break="none">{[fg(C.dim)("     commands  "), fg(C.text)(cmdLine)]}</Text>
+    </Box>,
+    <Box height="1" direction="row">
+      <Text break="none">{[fg(C.dim)("     top keys  "), fg(C.text)(keyLine || "(none)")]}</Text>
+    </Box>,
+  ];
 };
 
 export default ({ patterns, selected, expanded, maxRows, widths }) => (
   <Box direction="column">
     {headerRow(widths)}
+    {spacer()}
     <Box height="1fr" direction="column" overflow="hidden">
       {() => {
         const rows = patterns.get();
         if (!rows.length) {
           return [
             <Box height="1">
-              <Text>{fg(DIM)("  waiting for traffic…  (redis-cli -h 127.0.0.1 … — must be TCP)")}</Text>
+              <Text>{fg(C.dim)("  waiting for traffic…  (send Redis commands over TCP)")}</Text>
             </Box>,
           ];
         }
         const sel = selected.get();
-        const openPat = expanded.get(); // the pattern string that's expanded, or null
+        const openPat = expanded.get();
         const out = [];
         let used = 0;
         for (let i = 0; i < rows.length && used < maxRows; i++) {
@@ -99,12 +94,14 @@ export default ({ patterns, selected, expanded, maxRows, widths }) => (
           out.push(patRow(p, widths, i === sel, isOpen));
           used++;
           if (isOpen) {
-            for (const dr of drillRows(p, widths)) {
+            for (const dr of drillRows(p)) {
               if (used >= maxRows) break;
               out.push(dr);
               used++;
             }
           }
+          // Breathing room between entries.
+          if (used < maxRows) { out.push(spacer()); used++; }
         }
         return out;
       }}
