@@ -24,11 +24,20 @@ export const layoutFor = ({ cols, rows }) => {
   // detail's 6-space indent never pushes against the edge).
   const reportW = clamp(20, cols - 2, 120);
 
+  // Flagged (lint-evidence) columns: marker | command | key | client | why.
+  // The `why` (the rule's guidance) takes the slack; the rest are fixed. mark(2)
+  // + cmd + key + client + 4 inter-column gaps.
+  const fCmdW = 9;
+  const fKeyW = 22;
+  const fClientW = 14;
+  const fWhyW = clamp(12, cols - (2 + fCmdW + fKeyW + fClientW + 4), 200);
+
   return {
     maxRows,
     cols,
     patterns: { pat: patW, cmds: cmdsW },
     commandMix: { cmd: cmdW, note: noteW },
     report: { width: reportW },
+    flagged: { cmd: fCmdW, key: fKeyW, client: fClientW, why: fWhyW },
   };
 };

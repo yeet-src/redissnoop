@@ -154,21 +154,69 @@ static __always_inline void parse_resp(const char *buf, int len, struct inflight
 	}
 }
 
+// CO-RE flavor naming every iov_iter field we read, under each name it has
+// carried across supported kernels. We touch these fields ONLY through this
+// flavor, never the kernel's own struct — because vmlinux.h is generated from
+// the build host's running kernel, so `msg->msg_iter.__iov` fails to *compile*
+// on a host whose kernel still calls it `iov` (and vice versa). Declaring the
+// members here decouples compilation from the build host: the object builds on
+// a 6.1 or a 6.16 box alike, and CO-RE resolves each field by name against
+// whatever kernel actually loads it. The flavor's own offsets are irrelevant.
+//
+//   iter_type — was `type` (direction packed in) before v5.14
+//   __iov     — the iovec pointer; was `iov` before v6.4 (commit de4eda9d)
+//   iov       — that older name; ITER_UBUF stores its buffer at this offset too
+struct iov_iter___compat {
+	__u8 iter_type;
+	const struct iovec *__iov;
+	const struct iovec *iov;
+} __attribute__((preserve_access_index));
+
 SEC("kprobe/tcp_sendmsg")
 int BPF_KPROBE(on_sendmsg, struct sock *sk, struct msghdr *msg, size_t size)
 {
 	// Pull the first PEEK_LEN bytes of the outgoing buffer out of the
-	// iov_iter. Modern kernels store a single user buffer inline as
-	// ITER_UBUF (ptr in `ubuf`); a classic iovec array is ITER_IOVEC
-	// (ptr in `__iov->iov_base`). redis-cli's write() lands as UBUF, so
-	// we must handle both. This is the one fragile read in v1.
-	__u8 itype = BPF_CORE_READ(msg, msg_iter.iter_type);
-	const void *base = NULL;
-	if (itype == ITER_UBUF) {
-		base = BPF_CORE_READ(msg, msg_iter.ubuf);
-	} else if (itype == ITER_IOVEC) {
-		const struct iovec *iov = BPF_CORE_READ(msg, msg_iter.__iov);
-		if (iov) base = BPF_CORE_READ(iov, iov_base);
+	// iov_iter. This is the one fragile read: the struct changed shape
+	// across the kernels we support, so every field access is CO-RE-guarded
+	// to keep the verifier happy on each. A modern kernel stores a single
+	// user buffer inline as ITER_UBUF (the union holds the buffer pointer
+	// directly); a classic iovec array is ITER_IOVEC (the union holds an
+	// `iovec *` we deref for iov_base). redis-cli's write() lands as UBUF
+	// on new kernels and as a single IOVEC on old ones.
+
+	// View the iterator through the compat flavor so each field resolves by
+	// name on the running kernel (see the struct comment above).
+	struct iov_iter___compat *it = (void *)&msg->msg_iter;
+
+	// iter_type was `type` (with the direction packed in) until v5.14. When
+	// the clean `iter_type` is absent we're on such a kernel — and those
+	// only ever produce the classic single-iovec form for a userspace
+	// write()/sendmsg, so we treat "no iter_type" as "iovec".
+	__u8 itype = 0;
+	bool has_itype = bpf_core_field_exists(it->iter_type);
+	if (has_itype)
+		itype = BPF_CORE_READ(it, iter_type);
+
+	// The first union member holds either the user buffer (ITER_UBUF) or the
+	// `iovec *` — same offset, so one read covers both. Renamed `iov` ->
+	// `__iov` in v6.4; read whichever name this kernel uses.
+	const void *p = NULL;
+	if (bpf_core_field_exists(it->__iov))
+		p = BPF_CORE_READ(it, __iov);
+	else
+		p = BPF_CORE_READ(it, iov);
+	if (!p) return 0;
+
+	// Is this an ITER_UBUF iter? The enumerator was added in v6.0 and its
+	// numeric value has shifted across releases, so resolve it against the
+	// running kernel rather than trusting a compile-time constant.
+	const void *base;
+	if (has_itype &&
+	    bpf_core_enum_value_exists(enum iter_type, ITER_UBUF) &&
+	    itype == bpf_core_enum_value(enum iter_type, ITER_UBUF)) {
+		base = p; // p is the user buffer itself
+	} else {
+		base = (const void *)BPF_CORE_READ((const struct iovec *)p, iov_base);
 	}
 	if (!base) return 0;
 

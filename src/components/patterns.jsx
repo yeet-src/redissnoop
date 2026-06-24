@@ -4,7 +4,10 @@
 // traffic, blue = plaintext only. No glyphs — color carries the meaning, and
 // every column lines up.
 //
-// ↑/↓ select · Enter/Space expand. Pure presentation.
+// ↑/↓ select · Enter/Space expand. Also mouse-driven: a row highlights on
+// hover and a click selects + toggles its drill-down. Hit-testing and the
+// enter/leave that drive `setHover` are the engine's job (it bubbles each
+// mouse event up the struck node's spine), so the rows just declare handlers.
 import { Box, Text, bold, fg } from "yeet:tui";
 import { bar, fmtCount, lpad, pad, shareColor, srcColor } from "@/lib/format.js";
 import { C } from "@/lib/theme.js";
@@ -19,8 +22,6 @@ const rwSplit = (reads, writes) => {
   const rp = Math.round((reads / t) * 100);
   return `${rp}r/${100 - rp}w`;
 };
-
-const spacer = () => <Box height="1"><Text> </Text></Box>;
 
 const headerRow = (w) => (
   <Box height="1" direction="row" bg={C.headerBg}>
@@ -37,13 +38,15 @@ const headerRow = (w) => (
   </Box>
 );
 
-const patRow = (p, w, isSel, isOpen) => {
+const patRow = (p, w, { isSel, isOpen, isHover, onClick, onHover }) => {
   const c = srcColor(p.src); // pink (tls) | blue (wire)
+  // Precedence: keyboard selection wins, then the mouse-hover tint.
+  const rowBg = isSel ? C.selBg : isHover ? C.hoverBg : undefined;
   return (
-    <Box height="1" direction="row" bg={isSel ? C.selBg : undefined}>
+    <Box height="1" direction="row" bg={rowBg} onClick={onClick} setHover={onHover}>
       <Text break="none">
         {[
-          fg(isSel ? C.textBold : C.dim)(pad(isOpen ? "▾" : "▸", COL.mark)),
+          fg(isSel ? C.textBold : isHover ? C.label : C.dim)(pad(isOpen ? "▾" : "▸", COL.mark)),
           bold(fg(c)(pad(p.pat, w.pat))), " ",
           fg(shareColor(p.share))(lpad(`${p.share.toFixed(1)}%`, COL.share)), " ",
           ...bar(p.share, BAR_W), " ",
@@ -70,10 +73,9 @@ const drillRows = (p) => {
   ];
 };
 
-export default ({ patterns, selected, expanded, maxRows, widths }) => (
+export default ({ patterns, selected, expanded, hovered, maxRows, widths }) => (
   <Box direction="column">
     {headerRow(widths)}
-    {spacer()}
     <Box height="1fr" direction="column" overflow="hidden">
       {() => {
         const rows = patterns.get();
@@ -86,12 +88,28 @@ export default ({ patterns, selected, expanded, maxRows, widths }) => (
         }
         const sel = selected.get();
         const openPat = expanded.get();
+        const hov = hovered.get(); // read so the body re-renders as hover moves
         const out = [];
         let used = 0;
         for (let i = 0; i < rows.length && used < maxRows; i++) {
           const p = rows[i];
           const isOpen = openPat === p.pat;
-          out.push(patRow(p, widths, i === sel, isOpen));
+          out.push(patRow(p, widths, {
+            isSel: i === sel,
+            isOpen,
+            isHover: hov === p.pat,
+            // Click selects this row (so the keyboard cursor follows) and
+            // toggles its drill-down, mirroring Enter.
+            onClick: () => {
+              selected.set(i);
+              expanded.set(expanded.get() === p.pat ? null : p.pat);
+            },
+            // The engine drives this true on enter, false on leave.
+            onHover: (h) => {
+              if (h) hovered.set(p.pat);
+              else if (hovered.get() === p.pat) hovered.set(null);
+            },
+          }));
           used++;
           if (isOpen) {
             for (const dr of drillRows(p)) {
@@ -100,8 +118,6 @@ export default ({ patterns, selected, expanded, maxRows, widths }) => (
               used++;
             }
           }
-          // Breathing room between entries.
-          if (used < maxRows) { out.push(spacer()); used++; }
         }
         return out;
       }}

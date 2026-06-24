@@ -11,8 +11,6 @@ import { C } from "@/lib/theme.js";
 const BAR_W = 14;
 const COL = { mark: 2, share: 7, ops: 8 };
 
-const spacer = () => <Box height="1"><Text> </Text></Box>;
-
 const headerRow = (w) => (
   <Box height="1" direction="row" bg={C.headerBg}>
     <Text break="none">
@@ -62,7 +60,6 @@ const drillRows = (c) => {
 export default ({ commandMix, selected, expanded, maxRows, widths }) => (
   <Box direction="column">
     {headerRow(widths)}
-    {spacer()}
     <Box height="1fr" direction="column" overflow="hidden">
       {() => {
         const rows = commandMix.get();
@@ -85,7 +82,6 @@ export default ({ commandMix, selected, expanded, maxRows, widths }) => (
               used++;
             }
           }
-          if (used < maxRows) { out.push(spacer()); used++; }
         }
         return out;
       }}
