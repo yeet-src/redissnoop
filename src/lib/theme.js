@@ -12,6 +12,7 @@ export const C = {
   // Surfaces
   rail: idx(234),        // header/footer rail bg (near-black)
   headerBg: idx(236),    // column-header row bg
+  hoverBg: idx(237),     // row under the mouse — subtler than selection
   selBg: idx(238),       // selected row bg
   // Chrome / text
   dim: idx(240),         // separators, faint chrome

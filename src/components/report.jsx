@@ -48,7 +48,6 @@ const findingRows = (f, width) => {
     );
   }
 
-  rows.push(<Box height="1"><Text> </Text></Box>); // spacer
   return rows;
 };
 

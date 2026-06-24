@@ -14,7 +14,7 @@ import { control } from "@/probes/probe.js";
 import { NOISE, footgunOf, isRealVerb, isWrite, keyPattern } from "@/lib/classify.js";
 
 const WINDOW_MS = 1000; // rate window
-const FEED = 300; // recent commands kept for the live feed view
+const FEED = 300; // recent FLAGGED commands kept for the live evidence feed
 const KEYS_PER_PATTERN_CAP = 2000; // distinct concrete keys tracked per pattern
 const TOP_N = 8; // top commands / keys surfaced in a drill-down
 
@@ -33,7 +33,7 @@ const cstr = (c) => {
 // Components read the published signals, never this.
 const byPattern = new Map(); // pattern -> { count, reads, writes, cmds:Set }
 const byCmd = new Map();     // verb    -> { count }
-const feed = [];             // recent raw commands, newest first
+const flagged = [];          // recent footgun commands, newest first (the Flagged feed)
 let seq = 0;                 // monotonic row id + total accepted count
 let rateMark = 0;            // seq at the last rate tick
 let curRate = 0;             // commands/sec from the last window
@@ -44,7 +44,9 @@ let tlsCount = 0;            // commands seen via the SSL_write (encrypted) prob
 export const patterns = from((state) => bindAgg(state, "patterns"), []);
 export const commandMix = from((state) => bindAgg(state, "commandMix"), []);
 export const stats = from((state) => bindAgg(state, "stats"), { rate: 0, total: 0, footguns: 0, wire: 0, tls: 0 });
-export const commands = from((state) => bindAgg(state, "commands"), []);
+// Live tail of commands a lint rule flags (footguns) — the evidence behind the
+// Report findings. Quiet when traffic is clean.
+export const flaggedCmds = from((state) => bindAgg(state, "flagged"), []);
 
 // One subscription, many watchers. Each from() registers a publisher; the
 // first to be watched starts the shared ring subscription, the last to be
@@ -52,7 +54,7 @@ export const commands = from((state) => bindAgg(state, "commands"), []);
 // as something is on screen.
 let sub = null;
 let refs = 0;
-const publishers = { patterns: null, commandMix: null, stats: null, commands: null };
+const publishers = { patterns: null, commandMix: null, stats: null, flagged: null };
 
 function recompute() {
   const total = seq || 1;
@@ -147,9 +149,16 @@ function bindAgg(state, which) {
         else if (c.keys.size < KEYS_PER_PATTERN_CAP) c.keys.set(key, 1);
       }
 
-      feed.unshift({ id: seq, cmd, key, comm: cstr(e.comm), pid: Number(e.pid), src });
-      if (feed.length > FEED) feed.pop();
-      publishers.commands?.set(feed.slice());
+      // Only footgun commands enter the feed — it's the live evidence for the
+      // Report's lint findings, not a raw firehose. Carrying the rule note (the
+      // "why") lets the view explain each flag inline. Publishing only on a flag
+      // also keeps this cheap under heavy clean traffic.
+      const note = footgunOf(cmd);
+      if (note) {
+        flagged.unshift({ id: seq, cmd, key, comm: cstr(e.comm), pid: Number(e.pid), src, note });
+        if (flagged.length > FEED) flagged.pop();
+        publishers.flagged?.set(flagged.slice());
+      }
     });
   }
 
@@ -175,7 +184,7 @@ function bindAgg(state, which) {
 export function reset() {
   byPattern.clear();
   byCmd.clear();
-  feed.length = 0;
+  flagged.length = 0;
   seq = 0;
   rateMark = 0;
   wireCount = 0;

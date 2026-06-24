@@ -10,7 +10,7 @@
   <a href="https://discord.gg/dYZu9PjKB"><img src="https://img.shields.io/badge/chat-Discord-5865F2" alt="Discord"></a>
 </p>
 
-![demo gif or screenshot (required, lives in assets/)](assets/redissnoop.gif)
+![redissnoop live demo: tabbing through the Report, Key Patterns, Command Mix, and Flagged views of live Redis traffic](assets/redissnoop.gif)
 
 **`redissnoop` is a live, zero-config profiler that shows what your application is actually doing to Redis, read straight from the kernel with eBPF.**
 
@@ -23,9 +23,9 @@
 curl -fsSL https://yeet.cx | sh
 yeet run github:yeet-src/redissnoop
 ```
-<sub>[Manual install guide](https://yeet.cx/docs/installation) | Linux only</sub>
+<sub>[Manual install guide](https://yeet.cx/docs/install/manual-installation) | Linux only</sub>
 
-Tab through the three views with `Tab` (or `1` / `2` / `3`). In a table, `↑` / `↓` selects a row and `Enter` expands it. `q` quits.
+Tab through the three views with `Tab` (or `1` / `2` / `3`). In a table, `↑` / `↓` selects a row and `Enter` expands it. `q` quits. The mouse works too: click a tab to switch to it, and click a row to select and expand it.
 
 ## A 60-second primer on watching Redis traffic
 
