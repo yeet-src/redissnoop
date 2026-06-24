@@ -59,18 +59,36 @@ const patRow = (p, w, { isSel, isOpen, isHover, onClick, onHover }) => {
   );
 };
 
-// Drill-down under an expanded row: top commands and top keys.
+// Drill-down under an expanded row: top commands inline, then top keys stacked
+// one per line under a "top keys" label.
 const drillRows = (p) => {
   const cmdLine = p.topCmds.map((c) => `${c.k} ${fmtCount(c.v)}`).join("   ");
-  const keyLine = p.topKeys.map((k) => `${k.k} ${fmtCount(k.v)}`).join("   ");
-  return [
+  const rows = [
     <Box height="1" direction="row">
       <Text break="none">{[fg(C.dim)("     commands  "), fg(C.text)(cmdLine)]}</Text>
     </Box>,
-    <Box height="1" direction="row">
-      <Text break="none">{[fg(C.dim)("     top keys  "), fg(C.text)(keyLine || "(none)")]}</Text>
-    </Box>,
   ];
+  rows.push(
+    <Box height="1" direction="row">
+      <Text break="none">{fg(C.dim)("     top keys")}</Text>
+    </Box>,
+  );
+  if (!p.topKeys.length) {
+    rows.push(
+      <Box height="1" direction="row">
+        <Text break="none">{fg(C.text)("               (none)")}</Text>
+      </Box>,
+    );
+  } else {
+    for (const k of p.topKeys) {
+      rows.push(
+        <Box height="1" direction="row">
+          <Text break="none">{fg(C.text)(`               ${k.k} ${fmtCount(k.v)}`)}</Text>
+        </Box>,
+      );
+    }
+  }
+  return rows;
 };
 
 export default ({ patterns, selected, expanded, hovered, maxRows, widths }) => (

@@ -9,10 +9,10 @@ const ACTIVE_FG = idx(231); // near-white on it
 
 // Tabs in cycle order — must match the keys in main.jsx's VIEWS / cycle.
 export const TABS = [
-  { id: "report", label: "Report" },
   { id: "patterns", label: "Key Patterns" },
   { id: "mix", label: "Command Mix" },
   { id: "flagged", label: "Flagged" },
+  { id: "report", label: "Report" },
 ];
 
 // Mouse hit-testing for the bar (used by main.jsx to make tabs clickable).

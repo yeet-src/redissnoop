@@ -29,7 +29,7 @@ import CommandMix from "@/components/commandmix.jsx";
 import Flagged from "@/components/flagged.jsx";
 import Footer from "@/components/footer.jsx";
 
-const view = signal("report"); // "report" | "patterns" | "mix" — opens on Report
+const view = signal("patterns"); // "report" | "patterns" | "mix" — opens on Key Patterns
 
 // The two table views own a cursor + expanded row each, so switching tabs
 // doesn't scramble the other's state. Report has no accordion. `id` extracts
@@ -112,10 +112,10 @@ onKey((e) => {
   if (code === "Escape" || k === "q") return yeet.exit();
   // Tab cycles forward, Shift+Tab back; number keys jump straight to a tab.
   if (code === "Tab" || k === "tab") return cycle(e.shiftKey ? -1 : 1);
-  if (k === "1") return view.set("report");
-  if (k === "2") return view.set("patterns");
-  if (k === "3") return view.set("mix");
-  if (k === "4") return view.set("flagged");
+  if (k === "1") return view.set("patterns");
+  if (k === "2") return view.set("mix");
+  if (k === "3") return view.set("flagged");
+  if (k === "4") return view.set("report");
   if (k === "p") return togglePause();
   if (k === "r") return reset();
   // Accordion navigation applies to whichever table view is active.
