@@ -21,7 +21,7 @@
 
 ```sh
 curl -fsSL https://yeet.cx | sh
-yeet run github:yeet-src/redissnoop
+yeet run https://github.com/yeet-src/redissnoop.git
 ```
 <sub>[Manual install guide](https://yeet.cx/docs/install/manual-installation) | Linux only</sub>
 
