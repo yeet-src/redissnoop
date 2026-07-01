@@ -58,7 +58,7 @@ const drillRows = (c) => {
 };
 
 export default ({ commandMix, selected, expanded, maxRows, widths }) => (
-  <Box direction="column">
+  <Box height="1fr" direction="column">
     {headerRow(widths)}
     <Box height="1fr" direction="column" overflow="hidden">
       {() => {

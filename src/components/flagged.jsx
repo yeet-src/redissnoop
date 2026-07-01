@@ -54,7 +54,7 @@ const flaggedRow = (r, w, { isSel, isHover, onClick, onHover }) => {
 };
 
 export default ({ flaggedCmds, selected, frozen, hovered, maxRows, widths }) => (
-  <Box direction="column">
+  <Box height="1fr" direction="column">
     <Box height="1fr" direction="column" overflow="hidden">
       {() => {
         const paused = !!frozen.get();
