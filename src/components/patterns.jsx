@@ -92,7 +92,7 @@ const drillRows = (p) => {
 };
 
 export default ({ patterns, selected, expanded, hovered, maxRows, widths }) => (
-  <Box direction="column">
+  <Box height="1fr" direction="column">
     {headerRow(widths)}
     <Box height="1fr" direction="column" overflow="hidden">
       {() => {

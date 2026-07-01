@@ -52,7 +52,7 @@ const findingRows = (f, width) => {
 };
 
 export default ({ patterns, commandMix, stats, maxRows, width }) => (
-  <Box direction="column">
+  <Box height="1fr" direction="column">
     <Box height="1" direction="row" bg={idx(236)}>
       <Text break="none">{fg(DIM)("  what to look at  —  ranked by what's most likely to matter")}</Text>
     </Box>
