@@ -1,3 +1,4 @@
+<!-- yeet:user-friendly-title: Inspect live Redis traffic -->
 # `redissnoop`
 
 > **tcpdump for your Redis queries.** Watch every command hit your server, encrypted or not, without touching the app.
